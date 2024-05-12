@@ -291,6 +291,7 @@ def main():
                                 "loss": loss.item(),
                                 "avg_loss": avg_loss,
                                 "acc_step": acc_step,
+                                "lr": optimizer.param_groups[0]["lr"],
                             },
                             step=global_step,
                         )
