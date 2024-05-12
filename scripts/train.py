@@ -208,6 +208,12 @@ def main():
         if not cfg.start_from_scratch:
             start_epoch, start_step, sampler_start_idx = ret
         logger.info(f"Loaded checkpoint {cfg.load} at epoch {start_epoch} step {start_step}")
+
+        
+        optim_lr = optimizer.param_groups[0]["lr"]
+        logger.info(f"Overwriting loaded learning rate from {optim_lr} to config lr={cfg.lr}")
+        for g in optimizer.param_groups:
+            g["lr"] = cfg.lr
     logger.info(f"Training for {cfg.epochs} epochs with {num_steps_per_epoch} steps per epoch")
 
     if cfg.dataset.type == "VideoTextDataset":
