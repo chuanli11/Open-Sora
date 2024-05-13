@@ -22,7 +22,7 @@ from opensora.acceleration.parallel_states import (
 )
 from opensora.acceleration.plugin import ZeroSeqParallelPlugin
 from opensora.datasets import prepare_dataloader, prepare_variable_dataloader, save_sample
-from opensora.registry import DATASETS, MODELS, SCHEDULERS, build_module
+from opensora.registry import DATASETS, MODELS, SCHEDULERS, SCHEDULERS_INFERENCE, build_module
 from opensora.utils.ckpt_utils import create_logger, load, model_sharding, record_model_param_shape, save
 from opensora.utils.config_utils import (
     create_experiment_workspace,
@@ -94,23 +94,11 @@ def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp
             prompts=prompts,
             device=device,
             additional_args=dict(
-                height=torch.tensor(
-                    [image_size[0]], device=device, dtype=dtype
-                ).repeat(len(prompts)),
-                width=torch.tensor(
-                    [image_size[1]], device=device, dtype=dtype
-                ).repeat(len(prompts)),
-                num_frames=torch.tensor(
-                    [num_frames], device=device, dtype=dtype
-                ).repeat(len(prompts)),
-                ar=torch.tensor(
-                    [image_size[0] / image_size[1]],
-                    device=device,
-                    dtype=dtype,
-                ).repeat(len(prompts)),
-                fps=torch.tensor(
-                    [fps], device=device, dtype=dtype
-                ).repeat(len(prompts)),
+                height=torch.tensor([image_size[0]], device=device, dtype=dtype).repeat(len(prompts)),
+                width=torch.tensor([image_size[1]], device=device, dtype=dtype).repeat(len(prompts)),
+                num_frames=torch.tensor([num_frames], device=device, dtype=dtype).repeat(len(prompts)),
+                ar=torch.tensor([image_size[0] / image_size[1]], device=device, dtype=dtype).repeat(len(prompts)),
+                fps=torch.tensor([fps], device=device, dtype=dtype).repeat(len(prompts)),
             ),
         )
         samples = vae.decode(samples.to(dtype))
@@ -121,7 +109,7 @@ def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp
                 save_path = os.path.join(
                     save_dir, f"sample_{sample_idx}"
                 )
-                ensure_parent_directory_exists(save_dir)
+                ensure_parent_directory_exists(save_path)
                 save_sample(
                     sample,
                     fps=fps,
@@ -266,6 +254,7 @@ def main():
 
     # 4.4. build scheduler
     scheduler = build_module(cfg.scheduler, SCHEDULERS)
+    scheduler_inference = build_module(cfg.scheduler_inference, SCHEDULERS)
 
     # 4.5. setup optimizer
     optimizer = HybridAdam(
@@ -336,7 +325,7 @@ def main():
     model_sharding(ema)
 
     # log prompts for pre-training ckpt
-    log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, start_epoch, exp_dir, start_step, dtype, device)
+    log_sample(model, text_encoder, vae, scheduler_inference, coordinator, cfg, start_epoch, exp_dir, start_step, dtype, device)
 
     # 6.2. training loop
     for epoch in range(start_epoch, cfg.epochs):
@@ -441,7 +430,7 @@ def main():
                     )
 
                     # log prompts for each checkpoints
-                    log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp_dir, global_step, dtype, device)
+                    log_sample(model, text_encoder, vae, scheduler_inference, coordinator, cfg, epoch, exp_dir, global_step, dtype, device)
 
 
         # the continue epochs are not resumed, so we need to reset the sampler start index and start step

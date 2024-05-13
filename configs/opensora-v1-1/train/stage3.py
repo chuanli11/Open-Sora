@@ -63,6 +63,12 @@ scheduler = dict(
     type="iddpm",
     timestep_respacing="",
 )
+scheduler_inference = dict(
+    type="iddpm",
+    num_sampling_steps=100,
+    cfg_scale=7.0,
+    cfg_channel=3,  # or None
+)
 
 # Others
 seed = 42
