@@ -1,6 +1,8 @@
 from copy import deepcopy
 from datetime import timedelta
 from pprint import pprint
+import numpy as np
+import os
 
 import torch
 import torch.distributed as dist
@@ -19,7 +21,7 @@ from opensora.acceleration.parallel_states import (
     set_sequence_parallel_group,
 )
 from opensora.acceleration.plugin import ZeroSeqParallelPlugin
-from opensora.datasets import prepare_dataloader, prepare_variable_dataloader
+from opensora.datasets import prepare_dataloader, prepare_variable_dataloader, save_sample
 from opensora.registry import DATASETS, MODELS, SCHEDULERS, build_module
 from opensora.utils.ckpt_utils import create_logger, load, model_sharding, record_model_param_shape, save
 from opensora.utils.config_utils import (
@@ -30,6 +32,90 @@ from opensora.utils.config_utils import (
 )
 from opensora.utils.misc import all_reduce_mean, format_numel_str, get_model_numel, requires_grad, to_torch_dtype
 from opensora.utils.train_utils import MaskGenerator, update_ema
+
+
+def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp_dir, global_step, dtype, device):
+    model = model.eval()
+    text_encoder.y_embedder = (
+        model.module.y_embedder
+    )  # hack for classifier-free guidance
+    save_dir = os.path.join(
+        exp_dir, f"epoch{epoch}-global_step{global_step + 1}"
+    )
+
+    prompts = [
+        "A scuba diver on a coral reef with schools of fish swimming, and a sea turtle and an octopus.",
+        "Two pirate ships battling each other with canons as they sail inside a cup filled with coffee. The two pirate ships are fully in view, and the camera view is an aeriel view looking down at a 45 degree angle at the ships.",
+        "People eating ice cream and drinkin espresso outside of a cafe on a narrow street in Rome. There are stores along the street selling a variety of wares. One shop sells fruits. Another shop sells vegetables. A third shop sells christmas ornaments. Many people walk along the street.",
+        "An astronaut walking on the moon, with the effects of gravity making the walk appear very bouncy.",
+        "A person walks down a garden path. The path is surrounded by gorgeous and colorful flowers, lush bushes, and grand trees. Butterflies and bees zip around the scene in the background. The person is walking directly towards the camera.",
+    ]
+
+    with torch.no_grad():
+        rng = np.random.default_rng(seed=0)
+        image_size = (256, 256)
+        num_frames = 16
+        fps = 8
+        input_size = (num_frames, *image_size)
+        latent_size = vae.get_latent_size(input_size)
+        z = rng.normal(size=(len(prompts), vae.out_channels, *latent_size))
+        z = torch.tensor(z, device=device, dtype=float).to(dtype=dtype)
+        samples = scheduler.sample(
+            model,
+            text_encoder,
+            z=z,
+            prompts=prompts,
+            device=device,
+            additional_args=dict(
+                height=torch.tensor(
+                    [image_size[0]], device=device, dtype=dtype
+                ).repeat(len(prompts)),
+                width=torch.tensor(
+                    [image_size[1]], device=device, dtype=dtype
+                ).repeat(len(prompts)),
+                num_frames=torch.tensor(
+                    [num_frames], device=device, dtype=dtype
+                ).repeat(len(prompts)),
+                ar=torch.tensor(
+                    [image_size[0] / image_size[1]],
+                    device=device,
+                    dtype=dtype,
+                ).repeat(len(prompts)),
+                fps=torch.tensor(
+                    [fps], device=device, dtype=dtype
+                ).repeat(len(prompts)),
+            ),
+        )
+        samples = vae.decode(samples.to(dtype))
+
+        # 4.4. save samples
+        if coordinator.is_master():
+            for sample_idx, sample in enumerate(samples):
+                save_path = os.path.join(
+                    save_dir, f"sample_{sample_idx}"
+                )
+                save_sample(
+                    sample,
+                    fps=fps,
+                    save_path=save_path,
+                )
+                if cfg.wandb:
+                    wandb.log(
+                        {
+                            f"eval/prompt_{sample_idx}": wandb.Video(
+                                os.path.abspath(save_path + ".mp4"),
+                                caption=prompts[sample_idx],
+                                format="mp4",
+                                fps=fps,
+                            )
+                        },
+                        step=global_step,
+                    )
+
+    model = model.train()
+    text_encoder.y_embedder = None
+
+
 
 
 def main():
@@ -221,6 +307,9 @@ def main():
         dataloader.sampler.set_start_index(sampler_start_idx)
     model_sharding(ema)
 
+    # log prompts for pre-training ckpt
+    log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, start_epoch, exp_dir, start_step, dtype, device)
+
     # 6.2. training loop
     for epoch in range(start_epoch, cfg.epochs):
         if cfg.dataset.type == "VideoTextDataset":
@@ -316,6 +405,10 @@ def main():
                     logger.info(
                         f"Saved checkpoint at epoch {epoch} step {step + 1} global_step {global_step + 1} to {exp_dir}"
                     )
+
+                    # log prompts for each checkpoints
+                    log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp_dir, global_step, dtype, device)
+
 
         # the continue epochs are not resumed, so we need to reset the sampler start index and start step
         if cfg.dataset.type == "VideoTextDataset":
