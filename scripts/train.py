@@ -52,6 +52,11 @@ def calculate_gradient_norm(model):
     total_norm = total_norm ** 0.5
     return total_norm
 
+def ensure_parent_directory_exists(file_path):
+    directory_path = os.path.dirname(file_path)
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)
+        print(f"Created directory: {directory_path}")
 
 
 def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp_dir, global_step, dtype, device):
@@ -64,11 +69,13 @@ def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp
     )
 
     prompts = [
-        "A scuba diver on a coral reef with schools of fish swimming, and a sea turtle and an octopus.",
         "Two pirate ships battling each other with canons as they sail inside a cup filled with coffee. The two pirate ships are fully in view, and the camera view is an aeriel view looking down at a 45 degree angle at the ships.",
-        "People eating ice cream and drinkin espresso outside of a cafe on a narrow street in Rome. There are stores along the street selling a variety of wares. One shop sells fruits. Another shop sells vegetables. A third shop sells christmas ornaments. Many people walk along the street.",
-        "An astronaut walking on the moon, with the effects of gravity making the walk appear very bouncy.",
-        "A person walks down a garden path. The path is surrounded by gorgeous and colorful flowers, lush bushes, and grand trees. Butterflies and bees zip around the scene in the background. The person is walking directly towards the camera.",
+        "Stunning aerial view of a road winding through a dark green forest. Mountains appear in the distance.",
+        "Flying through a modern city.",
+        "A savanna full of animals.",
+        "An archeological site in the mayan djungle. A mayan pyramid rises over the green landscape.",
+        "a close-up view of a vibrant scene from nature. The foreground is dominated by a cluster of small, white flowers with green leaves, their delicate petals and stems creating a sense of softness and freshness. These flowers are the main focus of the scene, their bright white color contrasting with the surrounding greenery.  In the background, there's a blurred landscape that appears to be a field or meadow, filled with tall, dry grasses that have turned a warm, golden color, suggesting either the onset of autumn or the end of a dry season. The grasses are scattered with small white flowers that echo the ones in the foreground, creating a sense of continuity and harmony in the scene.  The style of the scene is realistic, with a shallow depth of field that blurs the background, drawing the viewer's attention to the flowers in the foreground. The lighting in the scene is soft and diffused, with no harsh shadows, which enhances the natural and serene atmosphere of the scene. The colors are rich and saturated, particularly the whites of the flowers and the golden hues of the grasses, which contribute to the overall vibrancy of the scene",
+        "a serene scene of a small town nestled at the foot of a mountain range. The town, with its cluster of houses and buildings, is enveloped by a lush expanse of trees and shrubbery. The sky overhead is clear, casting a soft, diffused morning light over the landscape. In the distance, the mountains rise majestically, their peaks obscured by thin layers of snow. The colors in the scene are predominantly green and gray, reflecting the natural hues of the landscape. The green of the vegetation contrasts with the gray of the mountains and the overcast sky, creating a harmonious balance of colors.  Despite the absence of any discernible action or movement, the scene conveys a sense of tranquility and peace, as if time has slowed down in this secluded corner of the world. There are no texts or countable objects in the scene, and the relative positions of the objects suggest a typical layout for a small town, with houses and buildings scattered around a central area. Overall, the scene presents a picturesque snapshot of a quiet moment in a peaceful mountain town."
     ]
 
     with torch.no_grad():
@@ -114,6 +121,7 @@ def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp
                 save_path = os.path.join(
                     save_dir, f"sample_{sample_idx}"
                 )
+                ensure_parent_directory_exists(save_dir)
                 save_sample(
                     sample,
                     fps=fps,
