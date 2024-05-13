@@ -67,7 +67,7 @@ scheduler = dict(
 # Others
 seed = 42
 outputs = "outputs"
-wandb = False
+wandb = True
 
 epochs = 1000
 log_every = 10
