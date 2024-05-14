@@ -174,7 +174,64 @@ def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp
     load_rng_state(rng_state)
 
 
+measure_apt = False
+def hook_fn(module, input, output):
+    global measure_apt
+    with torch.no_grad():
+        if measure_apt:
+            act_sign = torch.nn.functional.relu(output.detach().sign()).type(torch.bool)
+            module.hashes = hash(act_sign)
+        else:
+            module.hashes = None
 
+# bin -> numbers
+def bin2numbers(input):
+    numbers = []
+    for i in range((input.size(1)-1)//64 + 1):
+        block = input[:,i*64:(i+1)*64]
+        base = 2**torch.arange(block.size(1), device=input.device)
+
+        # ensure that base is at correct dimension
+        base = base.unsqueeze(0)
+        for i in range(len(input.shape)-2):
+            base = base.unsqueeze(i+2)
+
+        # pytorch does not support uint64_t, but int64_t
+        # thus, we interpret last bit as sign
+        if block.size(1) == 64:
+            base[:,-1] = -1
+
+        num = (block*base).sum(1)
+        numbers.append(num)
+    return torch.stack(numbers, dim=1)
+
+
+def hash(act, labels=None):
+    FIRSTH = 37 # prime
+    A = 54059 # a prime
+    B = 76963 # another prime
+    # C = 86969 # yet another prime
+
+    device = act.device
+
+    numbers = bin2numbers(act)
+    if labels is not None:
+        numbers = torch.cat([numbers,labels],1)
+    numbers = numbers * B
+    result = FIRSTH;
+    d = numbers.shape[1];
+    for i in range(d):
+        number = numbers[:,i]
+        result = number ^ (result * A);
+    return result;
+
+
+def compute_hashes(model):
+    all_hashes = []
+    for module in model.modules():
+        if isinstance(module, torch.nn.SiLU):
+            all_hashes.append(module.hashes)
+    return all_hashes
 
 
 def main():
@@ -334,6 +391,13 @@ def main():
     else:
         num_steps_per_epoch = len(dataloader)
 
+
+    # Register hooks to capture activations
+    for module in model.modules():
+        if isinstance(module, torch.nn.SiLU):
+            module.register_forward_hook(hook_fn)
+
+
     # =======================================================
     # 6. training loop
     # =======================================================
@@ -405,15 +469,33 @@ def main():
                 for k, v in batch.items():
                     model_args[k] = v.to(device, dtype)
 
+                global measure_apt
+                next_global_step = epoch * num_steps_per_epoch + step
+                apt_every = 25
+                if coordinator.is_master() and (next_global_step + 1) % (cfg.log_every * apt_every) == 0:
+                    measure_apt = True
+                else:
+                    measure_apt = False
+
                 # Diffusion
                 t = torch.randint(0, scheduler.num_timesteps, (x.shape[0],), device=device)
                 loss_dict = scheduler.training_losses(model, x, t, model_args, mask=mask)
 
                 # Backward & update
                 loss = loss_dict["loss"].mean()
+                if coordinator.is_master() and measure_apt:
+                    metrics_before = compute_hashes(model)
                 booster.backward(loss=loss, optimizer=optimizer)
                 optimizer.step()
                 optimizer.zero_grad()
+
+                loss_dict = scheduler.training_losses(model, x, t, model_args, mask=mask)
+                loss = loss_dict["loss"].mean()
+                if coordinator.is_master() and measure_apt:
+                    metrics_after = compute_hashes(model)
+                    APTs = torch.tensor([(b == a).sum()/(a.shape[0] * np.prod(a.shape[2:])) for (b,a) in zip(metrics_before, metrics_after)])
+                else:
+                    APTs = None
 
                 # Update EMA
                 update_ema(ema, model.module, optimizer=optimizer)
@@ -447,6 +529,7 @@ def main():
                                 "lr": optimizer.param_groups[0]["lr"],
                                 "weight_norm": weight_norm,
                                 "gradient_norm": gradient_norm,
+                                **({"APT": APTs.mean().item()} if APTs is not None else {})
                             },
                             step=global_step,
                         )
