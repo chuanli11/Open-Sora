@@ -3,6 +3,7 @@ from datetime import timedelta
 from pprint import pprint
 import numpy as np
 import os
+import random
 
 import torch
 import torch.distributed as dist
@@ -34,6 +35,34 @@ from opensora.utils.misc import all_reduce_mean, format_numel_str, get_model_num
 from opensora.utils.train_utils import MaskGenerator, update_ema
 
 
+def save_rng_state():
+    rng_state = {
+        'torch': torch.get_rng_state(),
+        'torch_cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+        'numpy': np.random.get_state(),
+        'random': random.getstate()
+    }
+    return rng_state
+
+
+def load_rng_state(rng_state):
+    torch.set_rng_state(rng_state['torch'])
+    if rng_state['torch_cuda'] is not None:
+        torch.cuda.set_rng_state_all(rng_state['torch_cuda'])
+    np.random.set_state(rng_state['numpy'])
+    random.setstate(rng_state['random'])
+
+
+#from mmengine.runner import set_random_seed
+def set_seed_custom(seed):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    #set_random_seed(seed=seed)
+
+
 def calculate_weight_norm(model):
     total_norm = 0.0
     for param in model.parameters():
@@ -59,7 +88,13 @@ def ensure_parent_directory_exists(file_path):
         print(f"Created directory: {directory_path}")
 
 
+z_log = None
 def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp_dir, global_step, dtype, device):
+    global z_log
+    rng_state = save_rng_state()
+    back_to_train_model = model.training
+    back_to_train_vae = vae.training
+    vae = vae.eval()
     model = model.eval()
     text_encoder.y_embedder = (
         model.module.y_embedder
@@ -79,14 +114,16 @@ def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp
     ]
 
     with torch.no_grad():
-        rng = np.random.default_rng(seed=0)
         image_size = (256, 256)
         num_frames = 16
         fps = 8
         input_size = (num_frames, *image_size)
         latent_size = vae.get_latent_size(input_size)
-        z = rng.normal(size=(len(prompts), vae.out_channels, *latent_size))
-        z = torch.tensor(z, device=device, dtype=float).to(dtype=dtype)
+        if z_log is None:
+            rng = np.random.default_rng(seed=42)
+            z_log = rng.normal(size=(len(prompts), vae.out_channels, *latent_size))
+        z = torch.tensor(z_log, device=device, dtype=float).to(dtype=dtype)
+        set_seed_custom(42)
         samples = scheduler.sample(
             model,
             text_encoder,
@@ -128,8 +165,14 @@ def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp
                         step=global_step,
                     )
 
-    model = model.train()
+    if back_to_train_model:
+        model = model.train()
+    if back_to_train_vae:
+        vae = vae.train()
     text_encoder.y_embedder = None
+
+    load_rng_state(rng_state)
+
 
 
 
