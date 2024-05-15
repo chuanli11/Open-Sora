@@ -496,7 +496,7 @@ def main():
     model_sharding(ema)
 
     # log prompts for pre-training ckpt
-    first_global_step = start_epoch * num_steps_per_epoch + start_step - 1
+    first_global_step = start_epoch * num_steps_per_epoch + start_step
     if coordinator.is_master():
         log_sample(model, text_encoder, vae, scheduler_inference, coordinator, cfg, start_epoch, exp_dir, first_global_step, dtype, device)
 
