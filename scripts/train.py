@@ -35,6 +35,70 @@ from opensora.utils.misc import all_reduce_mean, format_numel_str, get_model_num
 from opensora.utils.train_utils import MaskGenerator, update_ema
 
 
+from torch.optim.lr_scheduler import LRScheduler as _LRScheduler
+from typing import List
+class WarmupScheduler(_LRScheduler):
+    """Starts with a log space warmup lr schedule until it reaches N epochs then applies
+    the specific scheduler (For example: ReduceLROnPlateau).
+
+    Args:
+        optimizer (:class:`torch.optim.Optimizer`): Wrapped optimizer.
+        warmup_epochs (int): Number of epochs to warmup lr in log space until starting applying the scheduler.
+        after_scheduler (:class:`torch.optim.lr_scheduler`): After warmup_epochs, use this scheduler.
+        last_epoch (int, optional): The index of last epoch, defaults to -1. When last_epoch=-1,
+            the schedule is started from the beginning or When last_epoch=-1, sets initial lr as lr.
+    """
+
+    def __init__(self, optimizer, warmup_epochs: int, after_scheduler: _LRScheduler, last_epoch: int = -1):
+        self.warmup_epochs = warmup_epochs
+        self.after_scheduler = after_scheduler
+        self.finished = False
+        self.min_lr  = 1e-7
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        if self.last_epoch >= self.warmup_epochs:
+            if not self.finished:
+                self.after_scheduler.base_lrs = [group['lr'] for group in self.optimizer.param_groups]
+                self.finished = True
+            return self.after_scheduler.get_lr()
+
+        return [self.min_lr * ((lr / self.min_lr) ** ((self.last_epoch + 1) / self.warmup_epochs)) for lr in self.base_lrs]
+
+    def step(self, epoch: int = None):
+        if self.finished:
+            if epoch is None:
+                self.after_scheduler.step(None)
+            else:
+                self.after_scheduler.step(epoch - self.warmup_epochs)
+        else:
+            return super().step(epoch)
+
+class ConstantWarmupLR(WarmupScheduler):
+    """Multistep learning rate scheduler with warmup.
+
+    Args:
+        optimizer (:class:`torch.optim.Optimizer`): Wrapped optimizer.
+        total_steps (int): Number of total training steps.
+        warmup_steps (int, optional): Number of warmup steps, defaults to 0.
+        gamma (float, optional): Multiplicative factor of learning rate decay, defaults to 0.1.
+        num_steps_per_epoch (int, optional): Number of steps per epoch, defaults to -1.
+        last_epoch (int, optional): The index of last epoch, defaults to -1. When last_epoch=-1,
+            the schedule is started from the beginning or When last_epoch=-1, sets initial lr as lr.
+    """
+
+    def __init__(
+        self,
+        optimizer,
+        lr: float,
+        warmup_steps: int = 0,
+        last_epoch: int = -1,
+        **kwargs,
+    ):
+        base_scheduler = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=lr, total_iters=1e600)
+        super().__init__(optimizer, warmup_steps, base_scheduler, last_epoch=last_epoch)
+
+
 def save_rng_state():
     rng_state = {
         'torch': torch.get_rng_state(),
@@ -363,7 +427,7 @@ def main():
         weight_decay=0,
         adamw_mode=True,
     )
-    lr_scheduler = None
+    lr_scheduler = ConstantWarmupLR(optimizer, lr=cfg.lr, warmup_steps=500, last_epoch=-1)
 
     # 4.6. prepare for training
     if cfg.grad_checkpoint:
@@ -412,7 +476,7 @@ def main():
             model,
             ema,
             optimizer,
-            lr_scheduler,
+            None,# lr_scheduler,
             cfg.load,
             sampler=sampler_to_io if not cfg.start_from_scratch else None,
         )
@@ -432,7 +496,8 @@ def main():
     model_sharding(ema)
 
     # log prompts for pre-training ckpt
-    log_sample(model, text_encoder, vae, scheduler_inference, coordinator, cfg, start_epoch, exp_dir, start_step, dtype, device)
+    first_global_step = start_epoch * num_steps_per_epoch + start_step - 1
+    log_sample(model, text_encoder, vae, scheduler_inference, coordinator, cfg, start_epoch, exp_dir, first_global_step, dtype, device)
 
     # 6.2. training loop
     for epoch in range(start_epoch, cfg.epochs):
@@ -488,6 +553,8 @@ def main():
                 booster.backward(loss=loss, optimizer=optimizer)
                 optimizer.step()
                 optimizer.zero_grad()
+                if lr_scheduler is not None:
+                    lr_scheduler.step()
 
                 loss_dict = scheduler.training_losses(model, x, t, model_args, mask=mask)
                 loss = loss_dict["loss"].mean()
