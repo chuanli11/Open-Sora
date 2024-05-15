@@ -538,7 +538,7 @@ def main():
                 global measure_apt
                 next_global_step = epoch * num_steps_per_epoch + step
                 apt_every = 25
-                if coordinator.is_master() and (next_global_step + 1) % (cfg.log_every * apt_every) == 0:
+                if coordinator.is_master() and next_global_step % (cfg.log_every * apt_every) == 0:
                     measure_apt = True
                 else:
                     measure_apt = False
@@ -576,7 +576,7 @@ def main():
                 acc_step += 1
 
                 # Log to tensorboard
-                if coordinator.is_master() and (global_step + 1) % cfg.log_every == 0:
+                if coordinator.is_master() and global_step % cfg.log_every == 0:
                     avg_loss = running_loss / log_step
                     pbar.set_postfix({"loss": avg_loss, "step": step, "global_step": global_step})
                     running_loss = 0
@@ -603,7 +603,7 @@ def main():
                         )
 
                 # Save checkpoint
-                if cfg.ckpt_every > 0 and (global_step + 1) % cfg.ckpt_every == 0:
+                if cfg.ckpt_every > 0 and global_step % cfg.ckpt_every == 0 and global_step != 0:
                     save(
                         booster,
                         model,
@@ -624,7 +624,7 @@ def main():
                     )
 
                     # log prompts for each checkpoints
-                if coordinator.is_master() and (global_step + 1) % 250 == 0:
+                if coordinator.is_master() and global_step % 250 == 0:
                     log_sample(model, text_encoder, vae, scheduler_inference, coordinator, cfg, epoch, exp_dir, global_step, dtype, device)
 
 
