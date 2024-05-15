@@ -497,7 +497,8 @@ def main():
 
     # log prompts for pre-training ckpt
     first_global_step = start_epoch * num_steps_per_epoch + start_step - 1
-    log_sample(model, text_encoder, vae, scheduler_inference, coordinator, cfg, start_epoch, exp_dir, first_global_step, dtype, device)
+    if coordinator.is_master():
+        log_sample(model, text_encoder, vae, scheduler_inference, coordinator, cfg, start_epoch, exp_dir, first_global_step, dtype, device)
 
     # 6.2. training loop
     for epoch in range(start_epoch, cfg.epochs):
@@ -623,6 +624,7 @@ def main():
                     )
 
                     # log prompts for each checkpoints
+                if coordinator.is_master() and (global_step + 1) % 250 == 0:
                     log_sample(model, text_encoder, vae, scheduler_inference, coordinator, cfg, epoch, exp_dir, global_step, dtype, device)
 
 
