@@ -4,6 +4,7 @@ from pprint import pprint
 import numpy as np
 import os
 import random
+import time
 
 import torch
 import torch.distributed as dist
@@ -514,7 +515,9 @@ def main():
             initial=start_step,
             total=num_steps_per_epoch,
         ) as pbar:
+            iteration_times = []
             for step, batch in pbar:
+                start_time = time.time()
                 x = batch.pop("video").to(device, dtype)  # [B, C, T, H, W]
                 y = batch.pop("text")
                 # Visual and text encoding
@@ -574,6 +577,8 @@ def main():
                 global_step = epoch * num_steps_per_epoch + step
                 log_step += 1
                 acc_step += 1
+                iteration_times.append(time.time() - start_time)
+
 
                 # Log to tensorboard
                 if coordinator.is_master() and global_step % cfg.log_every == 0:
@@ -589,6 +594,7 @@ def main():
                     if cfg.wandb:
                         wandb.log(
                             {
+                                "avg_iteration_time": sum(iteration_times) / len(iteration_times),
                                 "iter": global_step,
                                 "epoch": epoch,
                                 "loss": loss.item(),
@@ -601,6 +607,7 @@ def main():
                             },
                             step=global_step,
                         )
+                        iteration_times = []
 
                 # Save checkpoint
                 if cfg.ckpt_every > 0 and global_step % cfg.ckpt_every == 0 and global_step != 0:
