@@ -26,10 +26,11 @@ def process_single_row(row, args, log_name=None):
     #     return False
 
     timestamp = row["timestamp"]
+    fps = row["fps"]
     if not (timestamp.startswith("[") and timestamp.endswith("]")):
         return False
     scene_list = eval(timestamp)
-    scene_list = [(FrameTimecode(s, fps=args.target_fps), FrameTimecode(t, fps=args.target_fps)) for s, t in scene_list]
+    scene_list = [(FrameTimecode(s, fps=fps), FrameTimecode(t, fps=fps)) for s, t in scene_list]
     split_video(
         video_path,
         scene_list,
