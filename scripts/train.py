@@ -90,12 +90,12 @@ class ConstantWarmupLR(WarmupScheduler):
     def __init__(
         self,
         optimizer,
-        lr: float,
+        factor: float,
         warmup_steps: int = 0,
         last_epoch: int = -1,
         **kwargs,
     ):
-        base_scheduler = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=lr, total_iters=1e600)
+        base_scheduler = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=1, total_iters=-1)
         super().__init__(optimizer, warmup_steps, base_scheduler, last_epoch=last_epoch)
 
 
@@ -427,7 +427,7 @@ def main():
         weight_decay=0,
         adamw_mode=True,
     )
-    lr_scheduler = ConstantWarmupLR(optimizer, lr=cfg.lr, warmup_steps=500, last_epoch=-1)
+    lr_scheduler = ConstantWarmupLR(optimizer, factor=1, warmup_steps=200, last_epoch=-1)
 
     # 4.6. prepare for training
     if cfg.grad_checkpoint:
