@@ -64,7 +64,12 @@ class WarmupScheduler(_LRScheduler):
                 self.finished = True
             return self.after_scheduler.get_lr()
 
-        return [self.min_lr * ((lr / self.min_lr) ** ((self.last_epoch + 1) / self.warmup_epochs)) for lr in self.base_lrs]
+        # log linear
+        #return [self.min_lr * ((lr / self.min_lr) ** ((self.last_epoch + 1) / self.warmup_epochs)) for lr in self.base_lrs]
+
+        # cosine warmup
+        return [self.min_lr + (lr - self.min_lr) * 0.5 * (1 - torch.cos(torch.tensor((self.last_epoch + 1) / self.warmup_epochs * torch.pi))) for lr in self.base_lrs]
+
 
     def step(self, epoch: int = None):
         if self.finished:
