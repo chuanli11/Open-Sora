@@ -463,9 +463,9 @@ def main():
 
 
     # Register hooks to capture activations
-    for module in model.modules():
-        if isinstance(module, torch.nn.SiLU):
-            module.register_forward_hook(hook_fn)
+    #for module in model.modules():
+    #    if isinstance(module, torch.nn.SiLU):
+    #        module.register_forward_hook(hook_fn)
 
 
     # =======================================================
@@ -543,13 +543,13 @@ def main():
                 for k, v in batch.items():
                     model_args[k] = v.to(device, dtype)
 
-                global measure_apt
+                #global measure_apt
                 next_global_step = epoch * num_steps_per_epoch + step
                 apt_every = 25
-                if coordinator.is_master() and next_global_step % (cfg.log_every * apt_every) == 0:
-                    measure_apt = True
-                else:
-                    measure_apt = False
+                #if coordinator.is_master() and next_global_step % (cfg.log_every * apt_every) == 0:
+                #    measure_apt = True
+                #else:
+                #    measure_apt = False
 
                 # Diffusion
                 t = torch.randint(0, scheduler.num_timesteps, (x.shape[0],), device=device)
@@ -557,8 +557,8 @@ def main():
 
                 # Backward & update
                 loss = loss_dict["loss"].mean()
-                if coordinator.is_master() and measure_apt:
-                    metrics_before = compute_hashes(model)
+                #if coordinator.is_master() and measure_apt:
+                #    metrics_before = compute_hashes(model)
                 booster.backward(loss=loss, optimizer=optimizer)
                 optimizer.step()
                 optimizer.zero_grad()
@@ -567,11 +567,11 @@ def main():
 
                 loss_dict = scheduler.training_losses(model, x, t, model_args, mask=mask)
                 loss = loss_dict["loss"].mean()
-                if coordinator.is_master() and measure_apt:
-                    metrics_after = compute_hashes(model)
-                    APTs = torch.tensor([(b == a).sum()/(a.shape[0] * np.prod(a.shape[2:])) for (b,a) in zip(metrics_before, metrics_after)])
-                else:
-                    APTs = None
+                #if coordinator.is_master() and measure_apt:
+                #    metrics_after = compute_hashes(model)
+                #    APTs = torch.tensor([1 - (b == a).sum()/(a.shape[0] * np.prod(a.shape[2:])) for (b,a) in zip(metrics_before, metrics_after)])
+                #else:
+                #    APTs = None
 
                 # Update EMA
                 update_ema(ema, model.module, optimizer=optimizer)
@@ -607,8 +607,8 @@ def main():
                                 "acc_step": acc_step,
                                 "lr": optimizer.param_groups[0]["lr"],
                                 "weight_norm": weight_norm,
-                                "gradient_norm": gradient_norm,
-                                **({"APT": APTs.mean().item()} if APTs is not None else {})
+                                #"gradient_norm": gradient_norm,
+                                #**({"APT": APTs.mean().item()} if APTs is not None else {})
                             },
                             step=global_step,
                         )
