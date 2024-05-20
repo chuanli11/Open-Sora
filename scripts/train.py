@@ -176,9 +176,9 @@ def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp
     prompts = cfg.eval_prompts
 
     with torch.no_grad():
-        image_size = cfg.image_size
-        num_frames = cfg.num_frames
-        fps = cfg.fps
+        image_size = cfg.eval_image_size
+        num_frames = cfg.eval_num_frames
+        fps = cfg.eval_fps
         eval_batch_size = cfg.eval_batch_size
 
         input_size = (num_frames, *image_size)
@@ -641,7 +641,7 @@ def main():
                     )
 
                     # log prompts for each checkpoints
-                if coordinator.is_master() and global_step % 250 == 0:
+                if coordinator.is_master() and global_step % cfg.eval_steps == 0:
                     log_sample(model, text_encoder, vae, scheduler_inference, coordinator, cfg, epoch, exp_dir, global_step, dtype, device)
 
 
