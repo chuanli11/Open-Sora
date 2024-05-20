@@ -180,7 +180,7 @@ def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp
         num_frames = cfg.num_frames
         fps = cfg.fps
         eval_batch_size = cfg.eval_batch_size
-        
+
         input_size = (num_frames, *image_size)
         latent_size = vae.get_latent_size(input_size)
         if z_log is None:
@@ -340,8 +340,8 @@ def main():
 
         writer = create_tensorboard_writer(exp_dir)
         if cfg.wandb:
-            PROJECT="lego"
-            wandb.init(project=PROJECT, entity='lambdalabs', name=exp_name, config=cfg._cfg_dict)
+            PROJECT=cfg.wandb_project_name
+            wandb.init(project=PROJECT, entity=cfg.wandb_project_entity, name=exp_name, config=cfg._cfg_dict)
 
     # 2.3. initialize ColossalAI booster
     if cfg.plugin == "zero2":

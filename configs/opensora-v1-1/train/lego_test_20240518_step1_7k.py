@@ -110,3 +110,6 @@ eval_image_size = (360, 540)
 eval_num_frames = 16
 eval_fps = 8
 eval_eval_batch_size = 8
+
+wandb_project_name = "lego"
+wandb_project_entity = "lambdalabs"
