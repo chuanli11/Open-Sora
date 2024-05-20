@@ -24,7 +24,7 @@ from opensora.acceleration.parallel_states import (
 )
 from opensora.acceleration.plugin import ZeroSeqParallelPlugin
 from opensora.datasets import prepare_dataloader, prepare_variable_dataloader, save_sample
-from opensora.registry import DATASETS, MODELS, SCHEDULERS, SCHEDULERS_INFERENCE, build_module
+from opensora.registry import DATASETS, MODELS, SCHEDULERS, build_module
 from opensora.utils.ckpt_utils import create_logger, load, model_sharding, record_model_param_shape, save
 from opensora.utils.config_utils import (
     create_experiment_workspace,
@@ -173,23 +173,14 @@ def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp
         exp_dir, f"epoch{epoch}-global_step{global_step + 1}"
     )
 
-    prompts = [
-        "A close-up photograph of two pirate ships battling each other with canons as they sail inside a cup filled with coffee. The two pirate ships are fully in view, and the camera view is an aeriel view looking down at a 45 degree angle at the ships.",
-        "From a stunning aerial view, a car drives along a curvy road winding through a dark green forest. The car smoothly navigates the bends and turns. Birds soar above the treetops, and in the distance, mountains rise, their peaks partially shrouded in mist. The forest sways gently in the breeze, with leaves rustling softly.",
-        "The video begins with a smooth glide at a low altitude through a bustling modern city. The view ascends gradually, weaving between skyscrapers and capturing the vibrant urban life below. The perspective moves forward, providing a panoramic view of the cityscape, showcasing towering buildings, busy streets, and intricate architecture. The angle occasionally shifts to highlight notable landmarks and eventually soars high above the city, offering a breathtaking, wide-angle perspective of the entire metropolis.",
-        "In a savanna full of animals, the scene captures a variety of wildlife engaging in their natural behaviors. Herds of elephants slowly lumber across the grassy landscape, their trunks swinging rhythmically. Graceful giraffes extend their long necks to nibble on the leaves of tall acacia trees. Zebras trot in groups, their striped coats creating a mesmerizing pattern against the golden grass. Nearby, a pride of lions lounges in the shade, the cubs playfully batting at each other while the adults keep a watchful eye. In the background, antelopes and gazelles move swiftly, occasionally leaping gracefully as they navigate the terrain. Birds flutter overhead, their calls echoing across the expansive savanna.",
-        "A national geographic photograph of an archaeological site in the Mayan jungle. A Mayan pyramid rises above the green landscape. The camera slowly rises from the lush forest floor to reveal the majestic pyramid emerging from the dense greenery.",
-        "A close-up time-lapse captures a cluster of large, vibrant purple flowers as they transition from buds to full bloom. The delicate petals slowly unfurl against lush green leaves, showcasing the beauty of the blooming process. The background, a blurred meadow with tall, golden grasses, sways gently, adding to the serene scene. The camera remains steady, focusing on the flowers' transformation, with soft, diffused lighting enhancing the rich colors and natural beauty of the flowers as they open.",
-        "A serene scene of a small town nestled at the foot of a mountain range. The town, with its cluster of houses and buildings, is enveloped by a lush expanse of trees and shrubbery. The sky overhead is clear, casting a soft, diffused morning light over the landscape. In the distance, the mountains rise majestically, their peaks obscured by thin layers of snow. The colors in the scene are predominantly green and gray, reflecting the natural hues of the landscape. The green of the vegetation contrasts with the gray of the mountains and the overcast sky, creating a harmonious balance of colors.  Despite the absence of any discernible action or movement, the scene conveys a sense of tranquility and peace, as if time has slowed down in this secluded corner of the world. There are no texts or countable objects in the scene, and the relative positions of the objects suggest a typical layout for a small town, with houses and buildings scattered around a central area. Overall, the scene presents a picturesque snapshot of a quiet moment in a peaceful mountain town. The camera zooms in on the city clock.",
-        "A stunning photograph of a small llama approaching a larger llama, presumably the mother. Both animals are surrounded by yellow flowers and are standing on a grassy hill. The sky is blue, with only a few white clouds casting shadows on the landscape behind the llamas.",
-        "The camera orbits Machu Picchu, starting from a low angle that showcases the ancient stone structures against the backdrop of lush green terraces. As it begins to circle the site, the camera gradually ascends, revealing the intricate layout of the ruins. The orbit continues, capturing different angles of the iconic citadel with the towering Huayna Picchu mountain in the background. The shot highlights the contrast between the historical architecture and the surrounding natural beauty, moving smoothly and steadily to provide a comprehensive, panoramic view of Machu Picchu from every direction.",
-        "A stunning time-lapse captures the Milky Way as it arcs across the night sky, set against a backdrop of rugged mountains. The scene begins with a twilight sky, the first stars appearing as the light fades. As the time-lapse progresses, the Milky Way emerges in full splendor, its dense clusters of stars and cosmic dust creating a mesmerizing band of light. Occasional meteor streaks add dynamic elements to the serene and awe-inspiring scene."
-    ]
+    prompts = cfg.eval_prompts
 
     with torch.no_grad():
-        image_size = (256, 256)
-        num_frames = 16
-        fps = 8
+        image_size = cfg.image_size
+        num_frames = cfg.num_frames
+        fps = cfg.fps
+        eval_batch_size = cfg.eval_batch_size
+        
         input_size = (num_frames, *image_size)
         latent_size = vae.get_latent_size(input_size)
         if z_log is None:
@@ -197,21 +188,29 @@ def log_sample(model, text_encoder, vae, scheduler, coordinator, cfg, epoch, exp
             z_log = rng.normal(size=(len(prompts), vae.out_channels, *latent_size))
         z = torch.tensor(z_log, device=device, dtype=float).to(dtype=dtype)
         set_seed_custom(42)
-        samples = scheduler.sample(
-            model,
-            text_encoder,
-            z=z,
-            prompts=prompts,
-            device=device,
-            additional_args=dict(
-                height=torch.tensor([image_size[0]], device=device, dtype=dtype).repeat(len(prompts)),
-                width=torch.tensor([image_size[1]], device=device, dtype=dtype).repeat(len(prompts)),
-                num_frames=torch.tensor([num_frames], device=device, dtype=dtype).repeat(len(prompts)),
-                ar=torch.tensor([image_size[0] / image_size[1]], device=device, dtype=dtype).repeat(len(prompts)),
-                fps=torch.tensor([fps], device=device, dtype=dtype).repeat(len(prompts)),
-            ),
-        )
-        samples = vae.decode(samples.to(dtype))
+
+        samples = []
+
+        for i in range(0, len(prompts), eval_batch_size):
+            batch_prompts = prompts[i:i + eval_batch_size]
+            batch_z = z[i:i + eval_batch_size]
+            batch_samples = scheduler.sample(
+                model,
+                text_encoder,
+                z=batch_z,
+                prompts=batch_prompts,
+                device=device,
+                additional_args=dict(
+                    height=torch.tensor([image_size[0]], device=device, dtype=dtype).repeat(len(batch_prompts)),
+                    width=torch.tensor([image_size[1]], device=device, dtype=dtype).repeat(len(batch_prompts)),
+                    num_frames=torch.tensor([num_frames], device=device, dtype=dtype).repeat(len(batch_prompts)),
+                    ar=torch.tensor([image_size[0] / image_size[1]], device=device, dtype=dtype).repeat(len(batch_prompts)),
+                    fps=torch.tensor([fps], device=device, dtype=dtype).repeat(len(batch_prompts)),
+                ),
+            )
+
+            batch_samples = vae.decode(batch_samples.to(dtype))
+            samples.extend(batch_samples)
 
         # 4.4. save samples
         if coordinator.is_master():
@@ -341,8 +340,8 @@ def main():
 
         writer = create_tensorboard_writer(exp_dir)
         if cfg.wandb:
-            PROJECT="que_sora_sora"
-            wandb.init(project=PROJECT, name=exp_name, config=cfg._cfg_dict)
+            PROJECT="lego"
+            wandb.init(project=PROJECT, entity='lambdalabs', name=exp_name, config=cfg._cfg_dict)
 
     # 2.3. initialize ColossalAI booster
     if cfg.plugin == "zero2":
@@ -436,8 +435,11 @@ def main():
         weight_decay=0,
         adamw_mode=True,
     )
-    lr_scheduler = ConstantWarmupLR(optimizer, factor=1, warmup_steps=200, last_epoch=-1)
-
+    if cfg.load is not None:
+        lr_scheduler = None
+    else:
+        lr_scheduler = ConstantWarmupLR(optimizer, factor=1, warmup_steps=500, last_epoch=-1)
+    
     # 4.6. prepare for training
     if cfg.grad_checkpoint:
         set_grad_checkpoint(model)
