@@ -251,7 +251,7 @@ def is_file_complete(file_path, interval=1, timeout=60):
     
     return False
 
-def log_sample(cfg, epoch, exp_dir, global_step, check_interval=1, size_stable_interval=1):
+def log_sample(is_master, cfg, epoch, exp_dir, global_step, check_interval=1, size_stable_interval=1):
     if cfg.wandb:
         for sample_idx, prompt in enumerate(cfg.eval_prompts):
             save_dir = os.path.join(
@@ -266,18 +266,19 @@ def log_sample(cfg, epoch, exp_dir, global_step, check_interval=1, size_stable_i
 
             # File exists, now check if it is complete
             if is_file_complete(file_path, interval=size_stable_interval):
-                wandb.log(
-                    {
-                        f"eval/prompt_{sample_idx}": wandb.Video(
-                            file_path,
-                            caption=prompt,
-                            format="mp4",
-                            fps=cfg.eval_fps,
-                        )
-                    },
-                    step=global_step,
-                )
-                print(f"{file_path} logged")
+                if is_master:
+                    wandb.log(
+                        {
+                            f"eval/prompt_{sample_idx}": wandb.Video(
+                                file_path,
+                                caption=prompt,
+                                format="mp4",
+                                fps=cfg.eval_fps,
+                            )
+                        },
+                        step=global_step,
+                    )
+                    print(f"{file_path} logged")
             else:
                 print(f"{file_path} not found, skip logging.")            
 
@@ -343,6 +344,8 @@ def compute_hashes(model):
     return all_hashes
 
 
+
+
 def main():
     # ======================================================
     # 1. args & cfg
@@ -362,6 +365,7 @@ def main():
     dist.init_process_group(backend="nccl", timeout=timedelta(hours=24))
     torch.cuda.set_device(dist.get_rank() % torch.cuda.device_count())
     set_seed(1024)
+    
     coordinator = DistCoordinator()
     device = get_current_device()
     dtype = to_torch_dtype(cfg.dtype)
@@ -547,8 +551,8 @@ def main():
     first_global_step = start_epoch * num_steps_per_epoch + start_step
 
     write_sample(model, text_encoder, vae, scheduler_inference, cfg, start_epoch, exp_dir, first_global_step, dtype, device)
-    if coordinator.is_master():
-        log_sample(cfg, start_epoch, exp_dir, first_global_step)
+    log_sample(coordinator.is_master(), cfg, start_epoch, exp_dir, first_global_step)
+    
 
     # 6.2. training loop
     for epoch in range(start_epoch, cfg.epochs):
@@ -682,8 +686,7 @@ def main():
                     # log prompts for each checkpoints
                 if global_step % cfg.eval_steps == 0:
                     write_sample(model, text_encoder, vae, scheduler_inference, cfg, epoch, exp_dir, global_step, dtype, device)
-                    if coordinator.is_master():
-                        log_sample(cfg, epoch, exp_dir, global_step)
+                    log_sample(coordinator.is_master(), cfg, epoch, exp_dir, global_step)
 
         # the continue epochs are not resumed, so we need to reset the sampler start index and start step
         if cfg.dataset.type == "VideoTextDataset":

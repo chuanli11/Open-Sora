@@ -8,7 +8,7 @@ dataset = dict(
     transform_name="resize_crop",
 )
 bucket_config = {  # 13s/it
-    "360p": {16: (1.0, 9)},
+    "360p": {32: (1.0, 4), 64: (1.0, 2)},
     # "144p": {1: (1.0, 200), 16: (1.0, 36), 32: (1.0, 18), 64: (1.0, 9), 128: (1.0, 4)},
     # "256": {1: (0.8, 200), 16: (0.5, 22), 32: (0.5, 11), 64: (0.5, 6), 128: (0.8, 4)},
     # "240p": {1: (0.8, 200), 16: (0.5, 22), 32: (0.5, 10), 64: (0.5, 6), 128: (0.5, 3)},
@@ -107,12 +107,12 @@ eval_prompts = [
 ]
 
 eval_image_size = (360, 540)
-eval_num_frames = 16
+eval_num_frames = 64
 eval_fps = 8
-eval_batch_size = 2
+eval_batch_size = 1
 eval_steps = ckpt_every
 
 wandb_project_name = "lego"
 wandb_project_entity = "lambdalabs"
 
-exp_id = "step1_24k"
+exp_id = "step1_24k_64f"
