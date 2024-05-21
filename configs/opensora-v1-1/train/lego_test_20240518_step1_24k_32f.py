@@ -110,7 +110,7 @@ eval_image_size = (360, 540)
 eval_num_frames = 32
 eval_fps = 8
 eval_batch_size = 8
-eval_steps = 1000
+eval_steps = ckpt_every
 
 wandb_project_name = "lego"
 wandb_project_entity = "lambdalabs"
